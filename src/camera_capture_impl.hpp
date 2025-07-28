@@ -5,6 +5,7 @@
 #include <libcamera/libcamera.h>
 #include <memory>
 #include <queue>
+#include <unordered_map>
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
@@ -56,6 +57,15 @@ private:
     bool startCapture();
     void stopCapture();
     bool running_ = false;
+
+    struct DmaBufferMapping
+    {
+        void* address = nullptr;  // dmabuf mapped address
+        size_t length = 0;  // dmabuf length
+    };
+
+    // index is fd
+    std::unordered_map<int, DmaBufferMapping> mapped_dmabuf_;
 };
 
 }  // namespace cv

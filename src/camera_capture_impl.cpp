@@ -4,6 +4,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/opencv.hpp>
 #include <sys/mman.h>
+#include <unistd.h>  // lseek
 
 // CV_FOURCC from new version of <opencv2/core/cvdef.h>
 // #include <opencv2/core/cvdef.h>
@@ -352,6 +353,12 @@ void CameraCaptureImpl::stopCapture()
     // free all requests
     free_requests_ = {};
     completed_requests_ = {};
+    // unmap dmabufs
+    for (auto& [fd, buf] : mapped_dmabuf_)
+    {
+        if (buf.address)
+            munmap(buf.address, buf.length);
+    }
     // free buffer
     allocator_->free(stream_);
     allocator_.reset();
@@ -384,39 +391,63 @@ void CameraCaptureImpl::onRequestCompleted(libcamera::Request* request)
     queue_cv_.notify_one();
 }
 
-// convert libcamera::FrameBuffer to OpenCV Matrix
-static bool FrameBufferToMat(libcamera::FrameBuffer* buffer,
-                             OutputArray output_image,
-                             const libcamera::StreamConfiguration& stream_config)
+bool CameraCaptureImpl::retrieveFrameFromRequest(libcamera::Request* request,
+                                                 OutputArray output_image)
 {
+    libcamera::FrameBuffer* buffer = request->findBuffer(stream_);
+    if (buffer == nullptr)
+    {
+        return false;
+    }
+
+    // Get configuration values
+    CV_Assert(camera_config_);
+    const auto& stream_config = camera_config_->at(0);
+
     const auto& planes = buffer->planes();
     if (planes.empty())
         return false;
 
     if (planes.size() > 1)
     {
-        CV_LOG_WARNING(NULL, "MultiPlane FrameBuffer");
+        CV_LOG_WARNING(NULL, "multiplane framebuffer not supported yet");
         return false;
     }
 
-    int fd = planes[0].fd.get();
-    size_t length = planes[0].length;
+    const int fd = planes[0].fd.get();
 
-    void* memory = mmap(nullptr, length, PROT_READ, MAP_SHARED, fd, planes[0].offset);
-    if (memory == MAP_FAILED)
+    DmaBufferMapping& mapped_buf = mapped_dmabuf_[fd];
+    if (mapped_buf.address == 0)
     {
-        CV_LOG_ERROR(NULL, "Failed to mmap buffer");
-        return false;
+        CV_LOG_INFO(NULL, "New dmabuf fd " << fd);
+        // dmabuf not mapped yet
+        const auto dmabuf_length = lseek(fd, 0, SEEK_END);
+        if (dmabuf_length == -1)
+        {
+            CV_LOG_ERROR(NULL, "lseek dambuf failed");
+            return false;
+        }
+        void* dmabuf_address = mmap(nullptr, dmabuf_length, PROT_READ, MAP_SHARED, fd, 0);
+        if (dmabuf_address == MAP_FAILED)
+        {
+            CV_LOG_ERROR(NULL, "mmap dambuf failed");
+        }
+        mapped_buf.address = dmabuf_address;
+        mapped_buf.length = dmabuf_length;
+        CV_LOG_INFO(NULL, "New dmabuf mapped, length=" << dmabuf_length);
     }
 
+    // copy/convert pixel data to OpenCV Matrix
+    void* memory = (uint8_t*)mapped_buf.address + planes[0].offset;
     const unsigned int w = stream_config.size.width;
     const unsigned int h = stream_config.size.height;
     const unsigned int stride = stream_config.stride;
+    CV_Assert(stride * h == planes[0].length);
+
     const libcamera::PixelFormat pixel_fmt = stream_config.pixelFormat;
 
     if (pixel_fmt == libcamera::formats::RGB888 || pixel_fmt == libcamera::formats::BGR888)
     {
-        CV_Assert(stride * h == length);
         Mat tmp = Mat(h, w, CV_8UC3, memory, stride).clone();
         output_image.move(tmp);
     }
@@ -436,24 +467,7 @@ static bool FrameBufferToMat(libcamera::FrameBuffer* buffer,
         return false;
     }
 
-    munmap(memory, length);
     return true;
-}
-
-bool CameraCaptureImpl::retrieveFrameFromRequest(libcamera::Request* request, OutputArray image)
-{
-    libcamera::FrameBuffer* buffer = request->findBuffer(stream_);
-    if (buffer == nullptr)
-    {
-        return false;
-    }
-
-    // Get configuration values
-    CV_Assert(camera_config_);
-    const auto& stream_config = camera_config_->at(0);
-
-    // Convert buffer to OpenCV Mat
-    return FrameBufferToMat(buffer, image, stream_config);
 }
 
 }  // namespace cv

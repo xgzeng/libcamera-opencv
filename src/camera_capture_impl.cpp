@@ -16,6 +16,13 @@ CV_INLINE int CV_FOURCC(char c1, char c2, char c3, char c4)
     return (c1 & 255) + ((c2 & 255) << 8) + ((c3 & 255) << 16) + ((c4 & 255) << 24);
 }
 
+#define LIBCAMERA_CHECK(result) \
+    if (result != 0) \
+    { \
+        CV_LOG_ERROR(NULL, "libcamera operation failed, error " << result); \
+        CV_Assert(false); \
+    }
+
 namespace cv {
 
 namespace controls = libcamera::controls;
@@ -67,7 +74,9 @@ void CameraCaptureImpl::close()
         return;
 
     stopCapture();
-    camera_->release();
+    int err = camera_->release();
+    LIBCAMERA_CHECK(err);
+
     camera_.reset();
     camera_config_.reset();
 }
@@ -340,7 +349,8 @@ void CameraCaptureImpl::stopCapture()
         return;
     }
 
-    camera_->stop();
+    int ret = camera_->stop();
+    LIBCAMERA_CHECK(ret);
 
     // wait for no pending request
     std::unique_lock<std::mutex> lock(queue_mutex_);

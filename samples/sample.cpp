@@ -13,9 +13,10 @@ namespace cv_logging = cv::utils::logging;
 #include <csignal>
 #include <atomic>
 
-std::atomic<bool> stop_flag{false};
+std::atomic<bool> stop_flag {false};
 
-void handle_sigint(int) {
+void handle_sigint(int)
+{
     stop_flag = true;
 }
 
@@ -75,7 +76,7 @@ bool configureCameraCapture(cv::CameraCapture& cap, int camera_index, const Came
     }
 
     CV_LOG_INFO(NULL, "Camera " << camera_index << " opened successfully");
-    
+
     // print default camera properties
     CV_LOG_INFO(NULL, "Camera " << camera_index << " default properties:");
     CV_LOG_INFO(NULL, "  Frame Width: " << cap.get(cv::CAP_PROP_FRAME_WIDTH));
@@ -106,7 +107,9 @@ bool configureCameraCapture(cv::CameraCapture& cap, int camera_index, const Came
 }
 
 // Function to merge multiple frames into a single composite frame
-cv::Mat mergeFrames(const std::vector<cv::Mat>& frames, const std::vector<int>& camera_indices, double fps = 0.0)
+cv::Mat mergeFrames(const std::vector<cv::Mat>& frames,
+                    const std::vector<int>& camera_indices,
+                    double fps = 0.0)
 {
     if (frames.empty())
         return cv::Mat();
@@ -131,30 +134,40 @@ cv::Mat mergeFrames(const std::vector<cv::Mat>& frames, const std::vector<int>& 
     {
         int row = i / cols;
         int col = i % cols;
-        
+
         int x = col * frame_width;
         int y = row * frame_height;
-        
+
         cv::Rect roi(x, y, frame_width, frame_height);
-        
+
         if (!frames[i].empty() && frames[i].size() == frame_size)
         {
             frames[i].copyTo(composite_frame(roi));
-            
+
             // Add camera index label
             std::string label = "Camera " + std::to_string(camera_indices[i]);
-            cv::putText(composite_frame, label, cv::Point(x + 10, y + 30), 
-                       cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0), 2);
+            cv::putText(composite_frame,
+                        label,
+                        cv::Point(x + 10, y + 30),
+                        cv::FONT_HERSHEY_SIMPLEX,
+                        1,
+                        cv::Scalar(0, 255, 0),
+                        2);
         }
         else
         {
             // Fill with black if frame is empty or wrong size
             composite_frame(roi) = cv::Scalar(0, 0, 0);
-            
+
             // Add "No Signal" text
             std::string label = "Camera " + std::to_string(camera_indices[i]) + " - No Signal";
-            cv::putText(composite_frame, label, cv::Point(x + 10, y + frame_height/2), 
-                       cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 255), 2);
+            cv::putText(composite_frame,
+                        label,
+                        cv::Point(x + 10, y + frame_height / 2),
+                        cv::FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        cv::Scalar(0, 0, 255),
+                        2);
         }
     }
 
@@ -163,25 +176,33 @@ cv::Mat mergeFrames(const std::vector<cv::Mat>& frames, const std::vector<int>& 
     {
         std::ostringstream fps_text;
         fps_text << "FPS: " << std::fixed << std::setprecision(1) << fps;
-        
+
         // Calculate text size to position it properly
         int font_face = cv::FONT_HERSHEY_SIMPLEX;
         double font_scale = 1.0;
         int thickness = 2;
-        cv::Size text_size = cv::getTextSize(fps_text.str(), font_face, font_scale, thickness, nullptr);
-        
+        cv::Size text_size =
+            cv::getTextSize(fps_text.str(), font_face, font_scale, thickness, nullptr);
+
         // Position in bottom-left corner with some padding
         cv::Point text_pos(20, composite_height - 20);
-        
+
         // Add a semi-transparent background for better visibility
-        cv::Rect bg_rect(text_pos.x - 10, text_pos.y - text_size.height - 5, 
-                        text_size.width + 20, text_size.height + 15);
+        cv::Rect bg_rect(text_pos.x - 10,
+                         text_pos.y - text_size.height - 5,
+                         text_size.width + 20,
+                         text_size.height + 15);
         cv::rectangle(composite_frame, bg_rect, cv::Scalar(0, 0, 0), -1);
         cv::rectangle(composite_frame, bg_rect, cv::Scalar(255, 255, 255), 1);
-        
+
         // Draw the FPS text
-        cv::putText(composite_frame, fps_text.str(), text_pos, 
-                   font_face, font_scale, cv::Scalar(0, 255, 255), thickness);
+        cv::putText(composite_frame,
+                    fps_text.str(),
+                    text_pos,
+                    font_face,
+                    font_scale,
+                    cv::Scalar(0, 255, 255),
+                    thickness);
     }
 
     return composite_frame;
@@ -202,7 +223,9 @@ int main(int argc, char** argv)
                    "Specify which cameras to operate on by index (e.g., -c 0 -c 1 or -c 0,1)")
         ->default_val(std::vector<int> {1});
 
-    app.add_option("-t,--timeout", options.timeout, "duration to capture frame(seconds), 0 - infinit")
+    app.add_option("-t,--timeout",
+                   options.timeout,
+                   "duration to capture frame(seconds), 0 - infinit")
         ->default_val(0);
 
     app.add_flag(
@@ -221,7 +244,8 @@ int main(int argc, char** argv)
 
     CLI11_PARSE(app, argc, argv);
 
-    cv_logging::setLogLevel(options.verbose ? cv_logging::LOG_LEVEL_INFO : cv_logging::LOG_LEVEL_WARNING);
+    cv_logging::setLogLevel(
+        options.verbose ? cv_logging::LOG_LEVEL_INFO : cv_logging::LOG_LEVEL_WARNING);
 
     // Register signal handler for Ctrl-C
     std::signal(SIGINT, handle_sigint);
@@ -289,22 +313,21 @@ int main(int argc, char** argv)
             if (!cameras[i].retrieve(frames[i]))
             {
                 any_failure = true;
-                CV_LOG_WARNING(NULL, "Failed to retrieve frame from camera " << options.camera_indices[i]);
+                CV_LOG_WARNING(
+                    NULL,
+                    "Failed to retrieve frame from camera " << options.camera_indices[i]);
                 break;
             }
         }
 
         if (any_failure)
-            continue;
+            break;
 
         // Display the merged frame
         if (options.show_window)
         {
             cv::Mat merged_frame = mergeFrames(frames, options.camera_indices, current_fps);
-            if (!merged_frame.empty())
-            {
-                cv::imshow("LibCamera Multi-View", merged_frame);
-            }
+            cv::imshow("LibCamera Multi-View", merged_frame);
             // Check for 'q' key press to exit early
             if (cv::pollKey() == 'q')
             {
@@ -318,12 +341,14 @@ int main(int argc, char** argv)
 
         // Update real-time FPS every 2 seconds
         auto current_time = std::chrono::steady_clock::now();
-        auto fps_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_fps_update);
-        if (fps_elapsed.count() >= 2000) // 2 seconds
+        auto fps_elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_fps_update);
+        if (fps_elapsed.count() >= 2000)  // 2 seconds
         {
             current_fps = frames_since_last_update * 1000.0 / fps_elapsed.count();
-            CV_LOG_INFO(NULL, "Real-time FPS: " << std::fixed << std::setprecision(1) << current_fps);
-            
+            CV_LOG_INFO(NULL,
+                        "Real-time FPS: " << std::fixed << std::setprecision(1) << current_fps);
+
             // Reset counters
             last_fps_update = current_time;
             frames_since_last_update = 0;
@@ -343,7 +368,9 @@ int main(int argc, char** argv)
     CV_LOG_INFO(NULL, "Average FPS: " << std::fixed << std::setprecision(2) << actual_fps);
     if (current_fps > 0)
     {
-        CV_LOG_INFO(NULL, "Last measured real-time FPS: " << std::fixed << std::setprecision(1) << current_fps);
+        CV_LOG_INFO(
+            NULL,
+            "Last measured real-time FPS: " << std::fixed << std::setprecision(1) << current_fps);
     }
 
     // Clean up

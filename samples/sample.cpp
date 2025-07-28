@@ -106,10 +106,62 @@ bool configureCameraCapture(cv::CameraCapture& cap, int camera_index, const Came
     return true;
 }
 
+enum LableCorner
+{
+    TOP_LEFT,
+    TOP_RIGHT,
+    BOTTOM_LEFT,
+    BOTTOM_RIGHT,
+};
+
+void labelFrame(cv::Mat& frame, const std::string& text, LableCorner corner)
+{
+    if (frame.empty() || text.empty())
+        return;
+
+    // Text properties
+    int font_face = cv::FONT_HERSHEY_SIMPLEX;
+    double font_scale = 1.0;
+    int thickness = 2;
+    cv::Scalar text_color(0, 255, 0);  // Green
+    cv::Scalar bg_color(0, 0, 0);  // Black background
+    cv::Scalar border_color(255, 255, 255);  // White border
+
+    // Calculate text size
+    cv::Size text_size = cv::getTextSize(text, font_face, font_scale, thickness, nullptr);
+
+    // Calculate position based on corner
+    cv::Point text_pos;
+    int padding = 10;
+
+    switch (corner)
+    {
+        case TOP_LEFT: text_pos = cv::Point(padding, text_size.height + padding); break;
+        case TOP_RIGHT:
+            text_pos =
+                cv::Point(frame.cols - text_size.width - padding, text_size.height + padding);
+            break;
+        case BOTTOM_LEFT: text_pos = cv::Point(padding, frame.rows - padding); break;
+        case BOTTOM_RIGHT:
+            text_pos = cv::Point(frame.cols - text_size.width - padding, frame.rows - padding);
+            break;
+    }
+
+        // Add background rectangle for better visibility
+#if 0    
+    cv::Rect bg_rect(text_pos.x - padding / 2,
+                     text_pos.y - text_size.height - padding / 2,
+                     text_size.width + padding,
+                     text_size.height + padding);
+    cv::rectangle(frame, bg_rect, bg_color, -1);
+    cv::rectangle(frame, bg_rect, border_color, 1);
+#endif
+    // Draw the text
+    cv::putText(frame, text, text_pos, font_face, font_scale, text_color, thickness);
+}
+
 // Function to merge multiple frames into a single composite frame
-cv::Mat mergeFrames(const std::vector<cv::Mat>& frames,
-                    const std::vector<int>& camera_indices,
-                    double fps = 0.0)
+cv::Mat mergeFrames(const std::vector<cv::Mat>& frames)
 {
     if (frames.empty())
         return cv::Mat();
@@ -139,70 +191,7 @@ cv::Mat mergeFrames(const std::vector<cv::Mat>& frames,
         int y = row * frame_height;
 
         cv::Rect roi(x, y, frame_width, frame_height);
-
-        if (!frames[i].empty() && frames[i].size() == frame_size)
-        {
-            frames[i].copyTo(composite_frame(roi));
-
-            // Add camera index label
-            std::string label = "Camera " + std::to_string(camera_indices[i]);
-            cv::putText(composite_frame,
-                        label,
-                        cv::Point(x + 10, y + 30),
-                        cv::FONT_HERSHEY_SIMPLEX,
-                        1,
-                        cv::Scalar(0, 255, 0),
-                        2);
-        }
-        else
-        {
-            // Fill with black if frame is empty or wrong size
-            composite_frame(roi) = cv::Scalar(0, 0, 0);
-
-            // Add "No Signal" text
-            std::string label = "Camera " + std::to_string(camera_indices[i]) + " - No Signal";
-            cv::putText(composite_frame,
-                        label,
-                        cv::Point(x + 10, y + frame_height / 2),
-                        cv::FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        cv::Scalar(0, 0, 255),
-                        2);
-        }
-    }
-
-    // Add FPS display in the bottom-left corner
-    if (fps > 0.0)
-    {
-        std::ostringstream fps_text;
-        fps_text << "FPS: " << std::fixed << std::setprecision(1) << fps;
-
-        // Calculate text size to position it properly
-        int font_face = cv::FONT_HERSHEY_SIMPLEX;
-        double font_scale = 1.0;
-        int thickness = 2;
-        cv::Size text_size =
-            cv::getTextSize(fps_text.str(), font_face, font_scale, thickness, nullptr);
-
-        // Position in bottom-left corner with some padding
-        cv::Point text_pos(20, composite_height - 20);
-
-        // Add a semi-transparent background for better visibility
-        cv::Rect bg_rect(text_pos.x - 10,
-                         text_pos.y - text_size.height - 5,
-                         text_size.width + 20,
-                         text_size.height + 15);
-        cv::rectangle(composite_frame, bg_rect, cv::Scalar(0, 0, 0), -1);
-        cv::rectangle(composite_frame, bg_rect, cv::Scalar(255, 255, 255), 1);
-
-        // Draw the FPS text
-        cv::putText(composite_frame,
-                    fps_text.str(),
-                    text_pos,
-                    font_face,
-                    font_scale,
-                    cv::Scalar(0, 255, 255),
-                    thickness);
+        frames[i].copyTo(composite_frame(roi));
     }
 
     return composite_frame;
@@ -318,6 +307,12 @@ int main(int argc, char** argv)
                     "Failed to retrieve frame from camera " << options.camera_indices[i]);
                 break;
             }
+
+            // Add camera index label using labelFrame function
+            if (options.show_window)
+            {
+                labelFrame(frames[i], cv::format("Cam%d", options.camera_indices[i]), TOP_LEFT);
+            }
         }
 
         if (any_failure)
@@ -326,7 +321,10 @@ int main(int argc, char** argv)
         // Display the merged frame
         if (options.show_window)
         {
-            cv::Mat merged_frame = mergeFrames(frames, options.camera_indices, current_fps);
+            cv::Mat merged_frame = mergeFrames(frames);
+            // Add FPS display in the bottom-left corner
+            labelFrame(merged_frame, cv::format("FPS: %.1f", current_fps), BOTTOM_LEFT);
+
             cv::imshow("LibCamera Multi-View", merged_frame);
             // Check for 'q' key press to exit early
             if (cv::pollKey() == 'q')

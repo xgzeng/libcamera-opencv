@@ -34,6 +34,18 @@ CameraCaptureImpl::~CameraCaptureImpl()
     close();
 }
 
+std::string CameraCaptureImpl::id() const
+{
+    if (camera_)
+    {
+        return camera_->id();
+    }
+    else
+    {
+        return "";
+    }
+}
+
 bool CameraCaptureImpl::open(std::shared_ptr<libcamera::Camera> camera)
 {
     if (camera->acquire() != 0)
@@ -429,7 +441,6 @@ bool CameraCaptureImpl::retrieveFrameFromRequest(libcamera::Request* request,
     DmaBufferMapping& mapped_buf = mapped_dmabuf_[fd];
     if (mapped_buf.address == 0)
     {
-        CV_LOG_INFO(NULL, "New dmabuf fd " << fd);
         // dmabuf not mapped yet
         const auto dmabuf_length = lseek(fd, 0, SEEK_END);
         if (dmabuf_length == -1)
@@ -444,7 +455,7 @@ bool CameraCaptureImpl::retrieveFrameFromRequest(libcamera::Request* request,
         }
         mapped_buf.address = dmabuf_address;
         mapped_buf.length = dmabuf_length;
-        CV_LOG_INFO(NULL, "New dmabuf mapped, length=" << dmabuf_length);
+        CV_LOG_DEBUG(NULL, "New dmabuf mapped, length=" << dmabuf_length);
     }
 
     // copy/convert pixel data to OpenCV Matrix

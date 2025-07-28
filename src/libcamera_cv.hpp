@@ -35,6 +35,7 @@ public:
     virtual bool set(int propId, double value);
 
     // Libcamera specific interface
+    std::string id() const;
     void setOrientation(bool hflip, bool vflip);
 
 private:

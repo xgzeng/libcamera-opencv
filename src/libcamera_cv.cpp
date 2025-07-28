@@ -66,7 +66,7 @@ bool CameraCapture::open(int index)
     }
 
     auto cameras = gCameraManager.cameras();
-    if (index < 1 || static_cast<size_t>(index) > cameras.size())
+    if (index <= 0 || index > cameras.size())
     {
         CV_LOG_ERROR(NULL, "Camera index " << index << " out of range");
         return false;
@@ -100,6 +100,11 @@ bool CameraCapture::isOpened() const
 void CameraCapture::release()
 {
     pImpl->close();
+}
+
+std::string CameraCapture::id() const
+{
+    return pImpl->id();
 }
 
 bool CameraCapture::read(OutputArray image)

@@ -22,6 +22,8 @@ public:
     bool open(std::shared_ptr<libcamera::Camera> cam);
     void close();
 
+    std::string id() const;
+
     // IVideoCapture
     double getProperty(int propId) const;
     bool setProperty(int propId, double value);

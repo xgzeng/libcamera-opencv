@@ -60,10 +60,11 @@ struct CameraConfig
 // Structure to hold application options
 struct AppOptions
 {
-    std::vector<int> camera_indices = {1};  // Default to camera 1
+    std::vector<int> camera_indices = {1};
     int timeout = 0;  // capture duration(seconds), 0 = infinite
     bool show_window = true;
     bool verbose = true;
+    std::string output_file;  // Output video file path
 };
 
 // Function to configure a single camera with the given options
@@ -75,10 +76,9 @@ bool configureCameraCapture(cv::CameraCapture& cap, int camera_index, const Came
         return false;
     }
 
-    CV_LOG_INFO(NULL, "Camera " << camera_index << " opened successfully");
-
+    CV_LOG_INFO(NULL, "Camera " << camera_index << "(" << cap.id() << ") opened successfully");
     // print default camera properties
-    CV_LOG_INFO(NULL, "Camera " << camera_index << " default properties:");
+    CV_LOG_INFO(NULL, "Default properties:");
     CV_LOG_INFO(NULL, "  Frame Width: " << cap.get(cv::CAP_PROP_FRAME_WIDTH));
     CV_LOG_INFO(NULL, "  Frame Height: " << cap.get(cv::CAP_PROP_FRAME_HEIGHT));
     CV_LOG_INFO(NULL,
@@ -197,6 +197,79 @@ cv::Mat mergeFrames(const std::vector<cv::Mat>& frames)
     return composite_frame;
 }
 
+static bool string_ends_with(const std::string_view& str, const std::string_view& substr)
+{
+    auto pos = str.rfind(substr);
+    return pos != std::string_view::npos && str.length() == (pos + substr.length());
+}
+
+// Function to initialize video writer with proper frame size detection
+bool initializeVideoWriter(cv::VideoWriter& video_writer,
+                           const std::string& output_file,
+                           std::vector<cv::CameraCapture>& cameras,
+                           double fps)
+{
+    if (!string_ends_with(output_file, ".mp4"))
+    {
+        CV_LOG_ERROR(NULL, "output file must end with .mp4");
+        return false;
+    }
+
+    // Get frame properties from all cameras to determine final output size
+    std::vector<cv::Mat> test_frames(cameras.size());
+    bool all_cameras_ready = true;
+
+    for (int i = 0; i < cameras.size(); ++i)
+    {
+        if (!cameras[i].read(test_frames[i]) || test_frames[i].empty())
+        {
+            CV_LOG_ERROR(NULL, "Failed to capture test frame from camera " << cameras[i].id());
+            all_cameras_ready = false;
+            break;
+        }
+    }
+
+    if (!all_cameras_ready)
+    {
+        CV_LOG_ERROR(NULL, "Failed to capture test frames for video initialization");
+        return false;
+    }
+
+    cv::Size frame_size;
+    if (cameras.size() > 1)
+    {
+        // For multiple cameras, calculate merged frame size using actual test frames
+        cv::Mat merged_test = mergeFrames(test_frames);
+        frame_size = merged_test.size();
+        CV_LOG_INFO(NULL,
+                    "Detected merged frame size: " << frame_size.width << "x" << frame_size.height);
+    }
+    else
+    {
+        // Single camera
+        frame_size = test_frames[0].size();
+        CV_LOG_INFO(
+            NULL,
+            "Detected single camera frame size: " << frame_size.width << "x" << frame_size.height);
+    }
+
+    // Use H.264 codec for better compression
+    int fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
+    if (video_writer.open(output_file, fourcc, fps, frame_size, true))
+    {
+        CV_LOG_INFO(NULL, "Video recording started: " << output_file);
+        CV_LOG_INFO(NULL,
+                    "Video format: " << frame_size.width << "x" << frame_size.height << " @ " << fps
+                                     << " FPS");
+        return true;
+    }
+    else
+    {
+        CV_LOG_ERROR(NULL, "Failed to open video writer for: " << output_file);
+        return false;
+    }
+}
+
 int main(int argc, char** argv)
 {
     AppOptions options;
@@ -209,7 +282,8 @@ int main(int argc, char** argv)
 
     app.add_option("-c,--camera",
                    options.camera_indices,
-                   "Specify which cameras to operate on by index (e.g., -c 0 -c 1 or -c 0,1)")
+                   "Specify which cameras to operate on by index(start from 1) (e.g., -c 1 -c 2 or "
+                   "-c 1,2)")
         ->default_val(std::vector<int> {1});
 
     app.add_option("-t,--timeout",
@@ -230,6 +304,9 @@ int main(int argc, char** argv)
     app.add_flag("-v,--verbose", options.verbose, "Enable verbose logging")->default_val(true);
     app.add_flag("--hflip", camera_config.hflip, "Enable horizontal flip");
     app.add_flag("--vflip", camera_config.vflip, "Enable vertical flip");
+    app.add_option("-o,--output",
+                   options.output_file,
+                   "Output H.264 video file path (e.g., output.mp4)");
 
     CLI11_PARSE(app, argc, argv);
 
@@ -241,7 +318,7 @@ int main(int argc, char** argv)
 
     // Create multiple camera capture objects
     const int camera_count = options.camera_indices.size();
-    cv::CameraCapture cameras[camera_count];
+    std::vector<cv::CameraCapture> cameras(camera_count);
 
     for (int i = 0; i < camera_count; ++i)
     {
@@ -251,6 +328,19 @@ int main(int argc, char** argv)
             CV_LOG_ERROR(NULL, "Failed to configure camera " << camera_index);
             return -1;
         }
+    }
+
+    // Initialize VideoWriter if output file is specified
+    bool recording = false;
+    cv::VideoWriter video_writer;
+    double fps = camera_config.frame_rate ? camera_config.frame_rate.value() : 30.0;
+    if (!options.output_file.empty())
+    {
+        if (!initializeVideoWriter(video_writer, options.output_file, cameras, fps))
+        {
+            return false;
+        }
+        recording = true;
     }
 
     if (options.show_window)
@@ -289,7 +379,7 @@ int main(int argc, char** argv)
             if (!cameras[i].grab())
             {
                 any_failure = true;
-                CV_LOG_ERROR(NULL, "Failed to grab from camera " << options.camera_indices[i]);
+                CV_LOG_ERROR(NULL, "Failed to grab from camera " << cameras[i].id());
                 break;
             }
         }
@@ -302,16 +392,14 @@ int main(int argc, char** argv)
             if (!cameras[i].retrieve(frames[i]))
             {
                 any_failure = true;
-                CV_LOG_WARNING(
-                    NULL,
-                    "Failed to retrieve frame from camera " << options.camera_indices[i]);
+                CV_LOG_WARNING(NULL, "Failed to retrieve frame from camera " << cameras[i].id());
                 break;
             }
 
             // Add camera index label using labelFrame function
             if (options.show_window)
             {
-                labelFrame(frames[i], cv::format("Cam%d", options.camera_indices[i]), TOP_LEFT);
+                labelFrame(frames[i], cv::format("Cam%l", i), TOP_LEFT);
             }
         }
 
@@ -326,12 +414,25 @@ int main(int argc, char** argv)
             labelFrame(merged_frame, cv::format("FPS: %.1f", current_fps), BOTTOM_LEFT);
 
             cv::imshow("LibCamera Multi-View", merged_frame);
+
+            // Write frame to video file if recording
+            if (recording)
+            {
+                video_writer.write(merged_frame);
+            }
+
             // Check for 'q' key press to exit early
             if (cv::pollKey() == 'q')
             {
                 CV_LOG_INFO(NULL, "Capture stopped by user");
                 break;
             }
+        }
+        else if (recording)
+        {
+            // If no window display, still write to video file
+            cv::Mat output_frame = (camera_count > 1) ? mergeFrames(frames) : frames[0];
+            video_writer.write(output_frame);
         }
 
         frame_count++;
@@ -375,6 +476,13 @@ int main(int argc, char** argv)
     for (auto& camera : cameras)
     {
         camera.release();
+    }
+
+    // Close video writer if it was opened
+    if (recording)
+    {
+        video_writer.release();
+        CV_LOG_INFO(NULL, "Video file saved: " << options.output_file);
     }
 
     if (options.show_window)

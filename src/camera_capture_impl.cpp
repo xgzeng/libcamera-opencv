@@ -7,8 +7,8 @@
 
 // CV_FOURCC from new version of <opencv2/core/cvdef.h>
 // #include <opencv2/core/cvdef.h>
-/** @brief Constructs the 'fourcc' code, used in video codecs and many other places.
-    Simply call it with 4 chars like `CV_FOURCC('I', 'Y', 'U', 'V')`
+/** @brief Constructs the 'fourcc' code, used in video codecs and many other
+   places. Simply call it with 4 chars like `CV_FOURCC('I', 'Y', 'U', 'V')`
 */
 CV_INLINE int CV_FOURCC(char c1, char c2, char c3, char c4)
 {
@@ -85,6 +85,7 @@ bool CameraCaptureImpl::grabFrame()
     std::lock_guard<std::mutex> lock(queue_mutex_);
     if (free_requests_.empty())
     {
+        CV_LOG_WARNING(NULL, "no more free buffer/request");
         return false;
     }
 
@@ -113,11 +114,9 @@ bool CameraCaptureImpl::retrieveFrame(int flag, OutputArray image)
             return !completed_requests_.empty();
         }))
     {
-        // Timeout
+        CV_LOG_WARNING(NULL, "wait request completion timeout");
         return false;
     }
-
-    CV_Assert(!completed_requests_.empty());
 
     // Get the completed request
     auto request = std::move(completed_requests_.front());
@@ -126,6 +125,7 @@ bool CameraCaptureImpl::retrieveFrame(int flag, OutputArray image)
 
     // process request without lock
     bool result = retrieveFrameFromRequest(request.get(), image);
+    CV_LOG_IF_ERROR(NULL, !result, "retrieve frame from completed request failed");
 
     // Move request back to free queue
     lock.lock();
@@ -134,7 +134,6 @@ bool CameraCaptureImpl::retrieveFrame(int flag, OutputArray image)
 
     return result;
 }
-
 
 void CameraCaptureImpl::setOrientation(libcamera::Orientation value)
 {
@@ -260,21 +259,15 @@ void CameraCaptureImpl::DumpCameraConfig()
 bool CameraCaptureImpl::startCapture()
 {
     CV_Assert(camera_);
-
-    // Get stream configuration reference
-    auto& stream_config = camera_config_->at(0);
-
-    CV_LOG_INFO(NULL, "Camera Configuration after configure");
-    DumpCameraConfig();
+    CV_LOG_INFO(NULL, "Start capture of camera " << camera_->id());
 
     // apply configuration
+    auto& stream_config = camera_config_->at(0);
     if (camera_->configure(camera_config_.get()))
     {
         CV_LOG_ERROR(NULL, "Failed to configure camera");
         return false;
     }
-
-    CV_LOG_INFO(NULL, "Camera Configuration after configure");
     DumpCameraConfig();
 
     // Store stream pointer for later use

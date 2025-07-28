@@ -106,7 +106,7 @@ bool configureCameraCapture(cv::CameraCapture& cap, int camera_index, const Came
 }
 
 // Function to merge multiple frames into a single composite frame
-cv::Mat mergeFrames(const std::vector<cv::Mat>& frames, const std::vector<int>& camera_indices)
+cv::Mat mergeFrames(const std::vector<cv::Mat>& frames, const std::vector<int>& camera_indices, double fps = 0.0)
 {
     if (frames.empty())
         return cv::Mat();
@@ -156,6 +156,32 @@ cv::Mat mergeFrames(const std::vector<cv::Mat>& frames, const std::vector<int>& 
             cv::putText(composite_frame, label, cv::Point(x + 10, y + frame_height/2), 
                        cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 255), 2);
         }
+    }
+
+    // Add FPS display in the bottom-left corner
+    if (fps > 0.0)
+    {
+        std::ostringstream fps_text;
+        fps_text << "FPS: " << std::fixed << std::setprecision(1) << fps;
+        
+        // Calculate text size to position it properly
+        int font_face = cv::FONT_HERSHEY_SIMPLEX;
+        double font_scale = 1.0;
+        int thickness = 2;
+        cv::Size text_size = cv::getTextSize(fps_text.str(), font_face, font_scale, thickness, nullptr);
+        
+        // Position in bottom-left corner with some padding
+        cv::Point text_pos(20, composite_height - 20);
+        
+        // Add a semi-transparent background for better visibility
+        cv::Rect bg_rect(text_pos.x - 10, text_pos.y - text_size.height - 5, 
+                        text_size.width + 20, text_size.height + 15);
+        cv::rectangle(composite_frame, bg_rect, cv::Scalar(0, 0, 0), -1);
+        cv::rectangle(composite_frame, bg_rect, cv::Scalar(255, 255, 255), 1);
+        
+        // Draw the FPS text
+        cv::putText(composite_frame, fps_text.str(), text_pos, 
+                   font_face, font_scale, cv::Scalar(0, 255, 255), thickness);
     }
 
     return composite_frame;
@@ -224,8 +250,13 @@ int main(int argc, char** argv)
     const auto start_time = std::chrono::steady_clock::now();
     int frame_count = 0;
 
+    // Real-time FPS calculation variables
+    auto last_fps_update = start_time;
+    int frames_since_last_update = 0;
+    double current_fps = 0.0;
+
     std::vector<cv::Mat> frames(camera_count);
-    while (true)
+    while (!stop_flag)
     {
         // Check if capture duration has elapsed
         if (options.timeout > 0)
@@ -264,12 +295,12 @@ int main(int argc, char** argv)
         }
 
         if (any_failure)
-            break;
+            continue;
 
         // Display the merged frame
         if (options.show_window)
         {
-            cv::Mat merged_frame = mergeFrames(frames, options.camera_indices);
+            cv::Mat merged_frame = mergeFrames(frames, options.camera_indices, current_fps);
             if (!merged_frame.empty())
             {
                 cv::imshow("LibCamera Multi-View", merged_frame);
@@ -282,13 +313,21 @@ int main(int argc, char** argv)
             }
         }
 
-        // Check for Ctrl-C
-        if (stop_flag) {
-            CV_LOG_INFO(NULL, "Capture stopped by Ctrl-C");
-            break;
-        }
-
         frame_count++;
+        frames_since_last_update++;
+
+        // Update real-time FPS every 2 seconds
+        auto current_time = std::chrono::steady_clock::now();
+        auto fps_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_fps_update);
+        if (fps_elapsed.count() >= 2000) // 2 seconds
+        {
+            current_fps = frames_since_last_update * 1000.0 / fps_elapsed.count();
+            CV_LOG_INFO(NULL, "Real-time FPS: " << std::fixed << std::setprecision(1) << current_fps);
+            
+            // Reset counters
+            last_fps_update = current_time;
+            frames_since_last_update = 0;
+        }
     }
 
     // Calculate and display FPS statistics
@@ -301,7 +340,11 @@ int main(int argc, char** argv)
     CV_LOG_INFO(NULL, "=== Capture Statistics ===");
     CV_LOG_INFO(NULL, "Total frames captured: " << frame_count);
     CV_LOG_INFO(NULL, "Total elapsed time: " << elapsed_seconds << " seconds");
-    CV_LOG_INFO(NULL, "Actual FPS: " << std::fixed << std::setprecision(2) << actual_fps);
+    CV_LOG_INFO(NULL, "Average FPS: " << std::fixed << std::setprecision(2) << actual_fps);
+    if (current_fps > 0)
+    {
+        CV_LOG_INFO(NULL, "Last measured real-time FPS: " << std::fixed << std::setprecision(1) << current_fps);
+    }
 
     // Clean up
     for (auto& camera : cameras)

@@ -10,7 +10,7 @@ include(CPM)
 find_package(OpenCV REQUIRED)
 find_package(PkgConfig REQUIRED)
 
-pkg_check_modules(LIBCAMERA REQUIRED libcamera)
+pkg_check_modules(libcamera REQUIRED libcamera IMPORTED_TARGET)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 

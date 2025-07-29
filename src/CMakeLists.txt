@@ -9,16 +9,12 @@ add_library(libcamera-opencv
 target_include_directories(libcamera-opencv
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
-  PRIVATE
-    ${LIBCAMERA_INCLUDE_DIRS}
 )
 
 target_link_libraries(libcamera-opencv
   PUBLIC
-    ${OpenCV_LIBS}
+    opencv_core
   PRIVATE
-    ${LIBCAMERA_LIBRARIES})
-
-target_compile_options(libcamera-opencv
-  PRIVATE
-    ${LIBCAMERA_CFLAGS_OTHER})
+    opencv_imgproc
+    PkgConfig::libcamera
+)

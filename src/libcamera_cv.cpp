@@ -58,6 +58,11 @@ CameraCapture::~CameraCapture()
     stopCameraManager();
 }
 
+libcamera::Camera* CameraCapture::camera() const
+{
+    return pImpl->camera();
+}
+
 bool CameraCapture::open(int index)
 {
     if (pImpl->isOpened())

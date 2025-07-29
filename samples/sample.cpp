@@ -374,7 +374,7 @@ int main(int argc, char** argv)
 
         bool any_failure = false;
         // issue capture request at same time
-        for (size_t i = 0; i < camera_count; ++i)
+        for (int i = 0; i < camera_count; ++i)
         {
             if (!cameras[i].grab())
             {
@@ -387,7 +387,7 @@ int main(int argc, char** argv)
         if (any_failure)
             break;
 
-        for (size_t i = 0; i < camera_count; ++i)
+        for (int i = 0; i < camera_count; ++i)
         {
             if (!cameras[i].retrieve(frames[i]))
             {
@@ -399,7 +399,7 @@ int main(int argc, char** argv)
             // Add camera index label using labelFrame function
             if (options.show_window)
             {
-                labelFrame(frames[i], cv::format("Cam%l", i), TOP_LEFT);
+                labelFrame(frames[i], cv::format("Cam%d", i), TOP_LEFT);
             }
         }
 

@@ -122,6 +122,31 @@ bool CameraCaptureImpl::grabFrame()
     return true;
 }
 
+libcamera::Request* CameraCaptureImpl::retrieveRequest()
+{
+    // Wait for a completed request to be available
+    std::unique_lock lock(queue_mutex_);
+    if (!queue_cv_.wait_for(lock, std::chrono::milliseconds(1000), [this] {
+            return !completed_requests_.empty();
+        }))
+    {
+        CV_LOG_WARNING(NULL, "wait request completion timeout");
+        return nullptr;
+    }
+
+    return completed_requests_.front().get();
+}
+
+void CameraCaptureImpl::finishRequest(libcamera::Request* request)
+{
+    std::lock_guard guard(queue_mutex_);
+    CV_Assert(!completed_requests_.empty() && request == completed_requests_.front().get());
+
+    request->reuse(libcamera::Request::ReuseBuffers);
+    free_requests_.push(std::move(completed_requests_.front()));
+    completed_requests_.pop();
+}
+
 bool CameraCaptureImpl::retrieveFrame(int flag, OutputArray image)
 {
     if (!camera_)
@@ -130,29 +155,17 @@ bool CameraCaptureImpl::retrieveFrame(int flag, OutputArray image)
         return false;
     }
 
-    // Wait for a completed request to be available
-    std::unique_lock<std::mutex> lock(queue_mutex_);
-    if (!queue_cv_.wait_for(lock, std::chrono::milliseconds(1000), [this] {
-            return !completed_requests_.empty();
-        }))
+    libcamera::Request* request = retrieveRequest();
+    if (!request)
     {
-        CV_LOG_WARNING(NULL, "wait request completion timeout");
         return false;
     }
 
-    // Get the completed request
-    auto request = std::move(completed_requests_.front());
-    completed_requests_.pop();
-    lock.unlock();
-
     // process request without lock
-    bool result = retrieveFrameFromRequest(request.get(), image);
+    bool result = retrieveFrameFromRequest(request, image);
     CV_LOG_IF_ERROR(NULL, !result, "retrieve frame from completed request failed");
 
-    // Move request back to free queue
-    lock.lock();
-    request->reuse(libcamera::Request::ReuseBuffers);
-    free_requests_.push(std::move(request));
+    finishRequest(request);
 
     return result;
 }
@@ -298,12 +311,11 @@ bool CameraCaptureImpl::startCapture()
     // Allocate buffers
     allocator_ = std::make_unique<libcamera::FrameBufferAllocator>(camera_);
     int n_buffer = allocator_->allocate(stream_);
-    if (n_buffer < 0)
+    if (n_buffer <= 0)
     {
         CV_LOG_ERROR(NULL, "Failed to allocate buffers");
         return false;
     }
-    CV_LOG_INFO(NULL, "Allocated " << n_buffer << " buffers");
 
     // Create all requests according to available buffer count
     for (int i = 0; i < n_buffer; ++i)

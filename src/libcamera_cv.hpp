@@ -8,6 +8,10 @@
 #include <memory>
 #include <vector>
 
+namespace libcamera {
+class Camera;
+}
+
 namespace cv {
 
 // Forward declarations
@@ -37,6 +41,8 @@ public:
     // Libcamera specific interface
     std::string id() const;
     void setOrientation(bool hflip, bool vflip);
+
+    libcamera::Camera* camera() const;
 
 private:
     // Internal implementation

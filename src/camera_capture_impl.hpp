@@ -24,6 +24,11 @@ public:
 
     std::string id() const;
 
+    libcamera::Camera* camera() const
+    {
+        return camera_.get();
+    }
+
     // IVideoCapture
     double getProperty(int propId) const;
     bool setProperty(int propId, double value);
@@ -31,7 +36,14 @@ public:
     bool retrieveFrame(int flag, OutputArray image);
     bool isOpened() const;
 
+    // libcamera specific interface
     void setOrientation(libcamera::Orientation value);
+
+    // Internal interface
+    /// retrieve first completed request
+    libcamera::Request* retrieveRequest();
+    /// finish first completed request
+    void finishRequest(libcamera::Request*);
 
 private:
     void onRequestCompleted(libcamera::Request* request);

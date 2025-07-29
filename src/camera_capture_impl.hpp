@@ -48,6 +48,7 @@ public:
 
 private:
     void onRequestCompleted(libcamera::Request* request);
+    void onDisconnected();
     bool retrieveFrameFromRequest(libcamera::Request* request, OutputArray image);
 
     std::shared_ptr<libcamera::Camera> camera_;

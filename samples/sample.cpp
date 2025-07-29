@@ -23,18 +23,32 @@ void handle_sigint(int)
 // CV_FOURCC from new version of <opencv2/core/cvdef.h>
 // #include <opencv2/core/cvdef.h>
 /** @brief Constructs the 'fourcc' code, used in video codecs and many other
-   places. Simply call it with 4 chars like `CV_FOURCC('I', 'Y', 'U', 'V')`
+   places. Can be called with 4 chars like `CV_FOURCC('I', 'Y', 'U', 'V')`
+   or with a string like `CV_FOURCC("IYUV")`
 */
-static constexpr int CV_FOURCC(char c1, char c2, char c3, char c4)
+static constexpr uint32_t CV_FOURCC(char c1, char c2, char c3, char c4)
 {
     return (c1 & 255) + ((c2 & 255) << 8) + ((c3 & 255) << 16) + ((c4 & 255) << 24);
 }
 
-constexpr int BG24 = CV_FOURCC('B', 'G', '2', '4');
-constexpr int RG24 = CV_FOURCC('R', 'G', '2', '4');
-// greyscale
-constexpr int R8 = CV_FOURCC('R', '8', ' ', ' ');
-constexpr int R16 = CV_FOURCC('R', '1', '6', ' ');
+// Overload to accept string parameter (handles strings shorter than 4 characters)
+static constexpr uint32_t CV_FOURCC(const std::string& fourcc_str)
+{
+    char c[4] = {' ', ' ', ' ', ' '};
+    for (int i = 0; i < 4; ++i)
+    {
+        if (fourcc_str[i] == 0)
+            break;
+        c[i] = fourcc_str[i];
+    }
+    return CV_FOURCC(c[0], c[1], c[2], c[3]);
+}
+
+// constexpr int BG24 = CV_FOURCC("BG24");
+// constexpr int RG24 = CV_FOURCC("RG24");
+// // greyscale - demonstrating shorter strings
+// constexpr int R8 = CV_FOURCC("R8");  // Automatically padded to "R8  "
+// constexpr int R16 = CV_FOURCC("R16");  // Automatically padded to "R16 "
 
 // Helper function to decode FourCC integer to string
 static std::string fourccToString(int fourcc)
@@ -53,6 +67,7 @@ struct CameraConfig
     std::optional<int> width;
     std::optional<int> height;
     std::optional<double> frame_rate;
+    std::string fourcc;
     bool hflip = false;
     bool vflip = false;
 };
@@ -96,6 +111,10 @@ bool configureCameraCapture(cv::CameraCapture& cap, int camera_index, const Came
     if (config.frame_rate)
     {
         cap.set(cv::CAP_PROP_FPS, config.frame_rate.value());
+    }
+    if (!config.fourcc.empty())
+    {
+        cap.set(cv::CAP_PROP_FOURCC, CV_FOURCC(config.fourcc));
     }
 
     // Apply flip settings for libcamera-based capture
@@ -203,18 +222,8 @@ static bool string_ends_with(const std::string_view& str, const std::string_view
     return pos != std::string_view::npos && str.length() == (pos + substr.length());
 }
 
-// Function to initialize video writer with proper frame size detection
-bool initializeVideoWriter(cv::VideoWriter& video_writer,
-                           const std::string& output_file,
-                           std::vector<cv::CameraCapture>& cameras,
-                           double fps)
+cv::Size detectMergedFrameSize(std::vector<cv::CameraCapture>& cameras)
 {
-    if (!string_ends_with(output_file, ".mp4"))
-    {
-        CV_LOG_ERROR(NULL, "output file must end with .mp4");
-        return false;
-    }
-
     // Get frame properties from all cameras to determine final output size
     std::vector<cv::Mat> test_frames(cameras.size());
     bool all_cameras_ready = true;
@@ -232,7 +241,7 @@ bool initializeVideoWriter(cv::VideoWriter& video_writer,
     if (!all_cameras_ready)
     {
         CV_LOG_ERROR(NULL, "Failed to capture test frames for video initialization");
-        return false;
+        return {};
     }
 
     cv::Size frame_size;
@@ -251,6 +260,21 @@ bool initializeVideoWriter(cv::VideoWriter& video_writer,
         CV_LOG_INFO(
             NULL,
             "Detected single camera frame size: " << frame_size.width << "x" << frame_size.height);
+    }
+
+    return frame_size;
+}
+
+// Function to initialize video writer with proper frame size detection
+bool initializeVideoWriter(cv::VideoWriter& video_writer,
+                           const std::string& output_file,
+                           cv::Size frame_size,
+                           double fps)
+{
+    if (!string_ends_with(output_file, ".mp4"))
+    {
+        CV_LOG_ERROR(NULL, "output file must end with .mp4");
+        return false;
     }
 
     // Use H.264 codec for better compression
@@ -304,6 +328,8 @@ int main(int argc, char** argv)
     app.add_flag("-v,--verbose", options.verbose, "Enable verbose logging")->default_val(true);
     app.add_flag("--hflip", camera_config.hflip, "Enable horizontal flip");
     app.add_flag("--vflip", camera_config.vflip, "Enable vertical flip");
+    app.add_option("-p,--pixel-format,--fourcc", camera_config.fourcc, "Pixel formart fourcc")
+        ->default_val(std::string {});
     app.add_option("-o,--output",
                    options.output_file,
                    "Output H.264 video file path (e.g., output.mp4)");
@@ -336,7 +362,13 @@ int main(int argc, char** argv)
     double fps = camera_config.frame_rate ? camera_config.frame_rate.value() : 30.0;
     if (!options.output_file.empty())
     {
-        if (!initializeVideoWriter(video_writer, options.output_file, cameras, fps))
+        cv::Size frame_size = detectMergedFrameSize(cameras);
+        if (frame_size.empty())
+        {
+            return false;
+        }
+
+        if (!initializeVideoWriter(video_writer, options.output_file, frame_size, fps))
         {
             return false;
         }
@@ -406,21 +438,18 @@ int main(int argc, char** argv)
         if (any_failure)
             break;
 
+        cv::Mat merged_frame;
+        if (options.show_window || recording)
+        {
+            merged_frame = mergeFrames(frames);
+            // Add FPS display in the bottom-left corner
+            labelFrame(merged_frame, cv::format("FPS: %.1f", current_fps), BOTTOM_LEFT);
+        }
+
         // Display the merged frame
         if (options.show_window)
         {
-            cv::Mat merged_frame = mergeFrames(frames);
-            // Add FPS display in the bottom-left corner
-            labelFrame(merged_frame, cv::format("FPS: %.1f", current_fps), BOTTOM_LEFT);
-
             cv::imshow("LibCamera Multi-View", merged_frame);
-
-            // Write frame to video file if recording
-            if (recording)
-            {
-                video_writer.write(merged_frame);
-            }
-
             // Check for 'q' key press to exit early
             if (cv::pollKey() == 'q')
             {
@@ -428,11 +457,10 @@ int main(int argc, char** argv)
                 break;
             }
         }
-        else if (recording)
+
+        if (recording)
         {
-            // If no window display, still write to video file
-            cv::Mat output_frame = (camera_count > 1) ? mergeFrames(frames) : frames[0];
-            video_writer.write(output_frame);
+            video_writer.write(merged_frame);
         }
 
         frame_count++;

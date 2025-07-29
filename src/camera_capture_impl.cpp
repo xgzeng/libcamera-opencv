@@ -67,11 +67,22 @@ bool CameraCaptureImpl::open(std::shared_ptr<libcamera::Camera> camera)
         camera->release();
         return false;
     }
-
     camera_config->at(0).pixelFormat = libcamera::formats::RGB888;
+    // default configuration maybe need adjust
+    switch (camera_config->validate())
+    {
+        case libcamera::CameraConfiguration::Valid: break;
+        case libcamera::CameraConfiguration::Invalid:
+            CV_LOG_ERROR(NULL, "default camera configuration is not valid");
+            break;
+        case libcamera::CameraConfiguration::Adjusted:
+            CV_LOG_WARNING(NULL, "default camera configuration is adjusted");
+            break;
+    }
 
     camera_ = camera;
     camera_config_ = std::move(camera_config);
+    camera_->disconnected.connect(this, &CameraCaptureImpl::onDisconnected);
     return true;
 }
 
@@ -253,7 +264,7 @@ bool CameraCaptureImpl::setProperty(int propId, double value)
                 supported_formats.end())
             {
                 CV_LOG_ERROR(NULL,
-                             "pixel format " << pixel_format << " is not supported by camera");
+                             "pixel format " << pixel_format << " is not supported by libcamera");
                 return false;
             }
             stream_config.pixelFormat = pixel_format;
@@ -264,16 +275,15 @@ bool CameraCaptureImpl::setProperty(int propId, double value)
         default: return false;
     }
 
-    libcamera::CameraConfiguration::Status status = camera_config_->validate();
-    if (status == libcamera::CameraConfiguration::Invalid)
+    switch (camera_config_->validate())
     {
-        // TODO: restore value
-        return false;
-    }
-    else if (status == libcamera::CameraConfiguration::Adjusted)
-    {
-        CV_LOG_WARNING(NULL, "Camera configuration adjusted");
-        return true;
+        case libcamera::CameraConfiguration::Invalid:
+            // TODO: restore value
+            CV_LOG_ERROR(NULL, "Camera configuration is invalid");
+            return false;
+        case libcamera::CameraConfiguration::Adjusted:
+            CV_LOG_WARNING(NULL, "Camera configuration adjusted while setting property " << propId);
+            return true;
     }
     return true;
 }
@@ -300,6 +310,13 @@ void CameraCaptureImpl::DumpCameraConfig()
                     "  stride=" << stream_config.stride << ", frameSize=" << stream_config.frameSize
                                 << ", bufferCount=" << stream_config.bufferCount);
     }
+    auto fd_ctrl = camera_->controls().find(&controls::FrameDurationLimits);
+    if (fd_ctrl != camera_->controls().end())
+    {
+        CV_LOG_INFO(NULL,
+                    "Duration Limits: " << fd_ctrl->second.min().get<int64_t>() << "-"
+                                        << fd_ctrl->second.max().get<int64_t>());
+    }
 }
 
 bool CameraCaptureImpl::startCapture()
@@ -308,6 +325,7 @@ bool CameraCaptureImpl::startCapture()
     CV_LOG_INFO(NULL, "Start capture of camera " << camera_->id());
 
     // apply configuration
+    DumpCameraConfig();
     auto& stream_config = camera_config_->at(0);
     if (camera_->configure(camera_config_.get()))
     {
@@ -353,7 +371,6 @@ bool CameraCaptureImpl::startCapture()
 
     // Start camera
     libcamera::ControlList ctrl_list(camera_->controls());
-    prepareControlList(ctrl_list);
     if (!prepareControlList(ctrl_list) || camera_->start(&ctrl_list) != 0)
     {
         CV_LOG_ERROR(NULL, "Failed to start camera");
@@ -371,6 +388,32 @@ bool CameraCaptureImpl::prepareControlList(libcamera::ControlList& ctrl_list)
     {
         // calculate frame duration from frame rate
         int64_t frame_duration = 1000000 / frame_rate_.value();
+
+        // apply camera limits
+        auto fd_ctrl = camera_->controls().find(&controls::FrameDurationLimits);
+        if (fd_ctrl != camera_->controls().end())
+        {
+            auto min_frame_duration = fd_ctrl->second.min().get<int64_t>();
+            auto max_frame_duration = fd_ctrl->second.max().get<int64_t>();
+            CV_LOG_INFO(NULL,
+                        "Duration Limits: " << min_frame_duration << "-" << max_frame_duration);
+            if (frame_duration < min_frame_duration)
+            {
+                CV_LOG_WARNING(NULL,
+                               "frame duration is adjusted from "
+                                   << frame_duration << " to " << min_frame_duration);
+                frame_duration = min_frame_duration;
+            }
+            if (frame_duration > max_frame_duration)
+            {
+                CV_LOG_WARNING(NULL,
+                               "frame duration is adjusted from "
+                                   << frame_duration << " to " << max_frame_duration);
+                frame_duration = max_frame_duration;
+            }
+        }
+
+        CV_LOG_INFO(NULL, "Apply Duration Limits: " << frame_duration);
         ctrl_list.set(controls::FrameDurationLimits,
                       libcamera::Span<const int64_t, 2>({frame_duration, frame_duration}));
     }
@@ -412,6 +455,11 @@ void CameraCaptureImpl::stopCapture()
     running_ = false;
 }
 
+void CameraCaptureImpl::onDisconnected()
+{
+    CV_LOG_WARNING(NULL, "camera disconnected");
+}
+
 void CameraCaptureImpl::onRequestCompleted(libcamera::Request* request)
 {
     std::lock_guard<std::mutex> lock(queue_mutex_);
@@ -423,7 +471,7 @@ void CameraCaptureImpl::onRequestCompleted(libcamera::Request* request)
     if (completed_request->status() == libcamera::Request::RequestCancelled)
     {
         // move to free queue
-        CV_LOG_INFO(NULL, "Request cancelled");
+        CV_LOG_WARNING(NULL, "Request cancelled");
         completed_request->reuse(libcamera::Request::ReuseBuffers);
         free_requests_.push(std::move(completed_request));
     }

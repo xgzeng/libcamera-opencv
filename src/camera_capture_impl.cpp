@@ -95,42 +95,53 @@ void CameraCaptureImpl::close()
 
 bool CameraCaptureImpl::grabFrame()
 {
+    return grabFrame(1) == 1;
+}
+
+int CameraCaptureImpl::grabFrame(int n)
+{
     if (!camera_)
-        return false;
+    {
+        CV_LOG_WARNING(NULL, "grabFrame failed, not opened");
+        return 0;
+    }
 
     if (!running_ && !startCapture())
     {
-        return false;
+        return 0;
     }
 
     // submit one request to capture frame
     std::lock_guard<std::mutex> lock(queue_mutex_);
-    if (free_requests_.empty())
+    int n_submitted = 0;
+    for (; n_submitted < n; ++n_submitted)
     {
-        CV_LOG_WARNING(NULL, "no more free buffer/request");
-        return false;
-    }
+        if (free_requests_.empty())
+        {
+            break;
+        }
 
-    if (camera_->queueRequest(free_requests_.front().get()))
-    {
-        CV_LOG_ERROR(NULL, "queueRequest failed");
-        return false;
-    }
+        if (camera_->queueRequest(free_requests_.front().get()))
+        {
+            CV_LOG_ERROR(NULL, "queueRequest failed");
+            break;
+        }
 
-    pending_requests_.push(std::move(free_requests_.front()));
-    free_requests_.pop();
-    return true;
+        pending_requests_.push(std::move(free_requests_.front()));
+        free_requests_.pop();
+    }
+    return n_submitted;
 }
 
-libcamera::Request* CameraCaptureImpl::retrieveRequest()
+
+libcamera::Request* CameraCaptureImpl::retrieveRequest(int timeout_ms)
 {
     // Wait for a completed request to be available
     std::unique_lock lock(queue_mutex_);
-    if (!queue_cv_.wait_for(lock, std::chrono::milliseconds(1000), [this] {
+    if (!queue_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] {
             return !completed_requests_.empty();
         }))
     {
-        CV_LOG_WARNING(NULL, "wait request completion timeout");
         return nullptr;
     }
 
@@ -155,7 +166,7 @@ bool CameraCaptureImpl::retrieveFrame(int flag, OutputArray image)
         return false;
     }
 
-    libcamera::Request* request = retrieveRequest();
+    libcamera::Request* request = retrieveRequest(1000);
     if (!request)
     {
         return false;

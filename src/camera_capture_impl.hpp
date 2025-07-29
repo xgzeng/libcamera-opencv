@@ -39,10 +39,11 @@ public:
     // libcamera specific interface
     void setOrientation(libcamera::Orientation value);
 
-    // Internal interface
-    /// retrieve first completed request
-    libcamera::Request* retrieveRequest();
-    /// finish first completed request
+    // extended interface
+    int grabFrame(int n);
+    /// retrieve first completed request(use with causion)
+    libcamera::Request* retrieveRequest(int timeout_ms);
+    /// finish first completed request(use with causion)
     void finishRequest(libcamera::Request*);
 
 private:

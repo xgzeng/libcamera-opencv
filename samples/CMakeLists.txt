@@ -5,7 +5,7 @@ target_link_libraries(sample_minimal libcamera-opencv opencv_highgui)
 
 add_executable(sample sample.cpp)
 target_link_libraries(sample
-    libcamera-opencv opencv_highgui CLI11::CLI11
+    libcamera-opencv CLI11::CLI11 opencv_videoio opencv_highgui
 )
 
 add_executable(raw_fps raw_fps.cpp)

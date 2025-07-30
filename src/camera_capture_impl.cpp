@@ -388,31 +388,6 @@ bool CameraCaptureImpl::prepareControlList(libcamera::ControlList& ctrl_list)
     {
         // calculate frame duration from frame rate
         int64_t frame_duration = 1000000 / frame_rate_.value();
-
-        // apply camera limits
-        auto fd_ctrl = camera_->controls().find(&controls::FrameDurationLimits);
-        if (fd_ctrl != camera_->controls().end())
-        {
-            auto min_frame_duration = fd_ctrl->second.min().get<int64_t>();
-            auto max_frame_duration = fd_ctrl->second.max().get<int64_t>();
-            CV_LOG_INFO(NULL,
-                        "Duration Limits: " << min_frame_duration << "-" << max_frame_duration);
-            if (frame_duration < min_frame_duration)
-            {
-                CV_LOG_WARNING(NULL,
-                               "frame duration is adjusted from "
-                                   << frame_duration << " to " << min_frame_duration);
-                frame_duration = min_frame_duration;
-            }
-            if (frame_duration > max_frame_duration)
-            {
-                CV_LOG_WARNING(NULL,
-                               "frame duration is adjusted from "
-                                   << frame_duration << " to " << max_frame_duration);
-                frame_duration = max_frame_duration;
-            }
-        }
-
         CV_LOG_INFO(NULL, "Apply Duration Limits: " << frame_duration);
         ctrl_list.set(controls::FrameDurationLimits,
                       libcamera::Span<const int64_t, 2>({frame_duration, frame_duration}));
@@ -498,8 +473,7 @@ bool CameraCaptureImpl::retrieveFrameFromRequest(libcamera::Request* request,
     const auto& stream_config = camera_config_->at(0);
 
     const auto& planes = buffer->planes();
-    if (planes.empty())
-        return false;
+    CV_Assert(!planes.empty());
 
     if (planes.size() > 1)
     {
@@ -529,6 +503,9 @@ bool CameraCaptureImpl::retrieveFrameFromRequest(libcamera::Request* request,
         CV_LOG_DEBUG(NULL, "New dmabuf mapped, length=" << dmabuf_length);
     }
 
+    CV_Assert(planes[0].offset < mapped_buf.length);
+    CV_Assert((planes[0].offset + planes[0].length) <= mapped_buf.length);
+
     // copy/convert pixel data to OpenCV Matrix
     void* memory = (uint8_t*)mapped_buf.address + planes[0].offset;
     const unsigned int w = stream_config.size.width;
@@ -536,27 +513,30 @@ bool CameraCaptureImpl::retrieveFrameFromRequest(libcamera::Request* request,
     const unsigned int stride = stream_config.stride;
     CV_Assert(stride * h == planes[0].length);
 
-    const libcamera::PixelFormat pixel_fmt = stream_config.pixelFormat;
-
-    if (pixel_fmt == libcamera::formats::RGB888 || pixel_fmt == libcamera::formats::BGR888)
+    switch (stream_config.pixelFormat)
     {
-        Mat tmp = Mat(h, w, CV_8UC3, memory, stride).clone();
-        output_image.move(tmp);
-    }
-    else if (pixel_fmt == libcamera::formats::R8)
-    {
-        Mat tmp = Mat(h, w, CV_8UC1, memory, stride).clone();
-        output_image.move(tmp);
-    }
-    else if (pixel_fmt == libcamera::formats::YUYV)
-    {
-        Mat tempFrame(h, w, CV_8UC2, memory, stride);
-        cvtColor(tempFrame, output_image, COLOR_YUV2BGR_YUYV);
-    }
-    else
-    {
-        CV_LOG_ERROR(NULL, "Unsupported pixel format " << pixel_fmt);
-        return false;
+        case libcamera::formats::RGB888:
+        case libcamera::formats::BGR888:
+        {
+            Mat tmp = Mat(h, w, CV_8UC3, memory, stride).clone();
+            output_image.move(tmp);
+        }
+        break;
+        case libcamera::formats::R8:
+        {
+            Mat tmp = Mat(h, w, CV_8UC1, memory, stride).clone();
+            output_image.move(tmp);
+        }
+        break;
+        case libcamera::formats::YUYV:
+        {
+            Mat tempFrame(h, w, CV_8UC2, memory, stride);
+            cvtColor(tempFrame, output_image, COLOR_YUV2BGR_YUYV);
+        }
+        break;
+        default:
+            CV_LOG_ERROR(NULL, "Unsupported pixel format " << stream_config.pixelFormat);
+            return false;
     }
 
     return true;

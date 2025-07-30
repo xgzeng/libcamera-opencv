@@ -1,12 +1,15 @@
 #include <libcamera_cv.hpp>
 #include <opencv2/highgui.hpp>
 
-int main() {
-    cv::CameraCapture cap(1);
+int main()
+{
+    cv::CameraCapture cap(0);
     cv::Mat frame;
-    while (cap.read(frame)) {
+    while (cap.read(frame))
+    {
         cv::imshow("Camera", frame);
-        if (cv::pollKey() == 'q') break;
+        if (cv::pollKey() == 'q')
+            break;
     }
     return 0;
 }

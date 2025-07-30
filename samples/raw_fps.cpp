@@ -20,7 +20,7 @@ int main(int argc, char* argv[])
     // Register signal handler for Ctrl-C
     std::signal(SIGINT, handle_sigint);
 
-    std::vector<int> camera_indices = {1};
+    std::vector<int> camera_indices = {0};
     std::optional<int> frame_rate;
     std::optional<int> width;
     std::optional<int> height;
@@ -28,7 +28,7 @@ int main(int argc, char* argv[])
     CLI::App app("raw_fps");
     app.set_help_flag("--help", "Show help message");
     app.add_option("-c,--camera", camera_indices, "Specify which cameras to capture")
-        ->default_val(std::vector<int> {1});
+        ->default_val(std::vector<int> {0});
     app.add_option("-w,--width", width, "Set frame width");
     app.add_option("-h,--height", height, "Set frame height");
     app.add_option("-f,--fps", frame_rate, "Set frame rate");
@@ -42,13 +42,13 @@ int main(int argc, char* argv[])
 
     for (auto index : camera_indices)
     {
-        if (index <= 0 || index > camera_manager.cameras().size())
+        if (index < 0 || index >= camera_manager.cameras().size())
         {
             std::cout << "invalid camera index " << index << std::endl;
             continue;
         }
         auto cap = std::make_unique<CameraCaptureImpl>();
-        if (!cap->open(camera_manager.cameras()[index - 1]))
+        if (!cap->open(camera_manager.cameras()[index]))
             continue;
 
         if (width)
@@ -75,14 +75,20 @@ int main(int argc, char* argv[])
     {
         for (auto& cap : captures)
         {
-            cap->grabFrame(4);
+            if (cap->grabFrame(1) == 0)
+            {
+                std::cout << "camera " << cap->id() << " grabFrame failed" << std::endl;
+            }
         }
 
         for (auto& cap : captures)
         {
-            libcamera::Request* req = cap->retrieveRequest(100);
+            libcamera::Request* req = cap->retrieveRequest(1000);
             if (!req)
+            {
+                std::cout << "camera " << cap->id() << "retrieveRequest failed" << std::endl;
                 continue;
+            }
             cap->finishRequest(req);
             frame_count++;
             frames_since_last_update++;

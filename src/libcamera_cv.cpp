@@ -71,13 +71,19 @@ bool CameraCapture::open(int index)
     }
 
     auto cameras = gCameraManager.cameras();
-    if (index <= 0 || index > cameras.size())
+    if (index < 0 || index >= cameras.size())
     {
         CV_LOG_ERROR(NULL, "Camera index " << index << " out of range");
         return false;
     }
 
-    return pImpl->open(cameras[index - 1]);
+    auto camera = cameras[index];
+    if (!pImpl->open(camera))
+    {
+        return false;
+    }
+    index_ = index;
+    return true;
 }
 
 bool CameraCapture::open(const std::string& device)
@@ -94,7 +100,23 @@ bool CameraCapture::open(const std::string& device)
         return false;
     }
 
-    return pImpl->open(camera);
+    // found out index
+    int index = 0;
+    auto cameras = gCameraManager.cameras();
+    for (; index < cameras.size(); ++index)
+    {
+    }
+    if (index == cameras.size())
+    {
+        CV_LOG_ERROR(NULL, "Camera not found: " << device);
+        return false;
+    }
+    if (!pImpl->open(camera))
+    {
+        return false;
+    }
+    index_ = index;
+    return true;
 }
 
 bool CameraCapture::isOpened() const
@@ -105,6 +127,12 @@ bool CameraCapture::isOpened() const
 void CameraCapture::release()
 {
     pImpl->close();
+    index_ = -1;
+}
+
+int CameraCapture::index() const
+{
+    return index_;
 }
 
 std::string CameraCapture::id() const

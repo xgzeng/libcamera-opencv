@@ -39,13 +39,15 @@ public:
     virtual bool set(int propId, double value);
 
     // Libcamera specific interface
+    int index() const;
     std::string id() const;
     void setOrientation(bool hflip, bool vflip);
+
 
     libcamera::Camera* camera() const;
 
 private:
-    // Internal implementation
+    int index_ = -1;
     std::unique_ptr<CameraCaptureImpl> pImpl;
 };
 

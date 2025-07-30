@@ -31,7 +31,7 @@ cmake --build --preset <debug|release>
 #include <opencv2/highgui.hpp>
 
 int main() {
-    cv::CameraCapture cap(1);
+    cv::CameraCapture cap(0);
     cv::Mat frame;
     while (cap.read(frame)) {
         cv::imshow("Camera", frame);
@@ -62,7 +62,7 @@ The included sample application demonstrates multi-camera capture with frame mer
 ./build/debug/bin/sample --hflip --vflip
 
 # Multiple camera capture with merged view
-./build/debug/bin/sample -c 1 -c 2
+./build/debug/bin/sample -c 0 -c 1
 ```
 
 ## API Reference

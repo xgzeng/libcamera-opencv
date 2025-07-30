@@ -39,17 +39,17 @@ public:
     // libcamera specific interface
     void setOrientation(libcamera::Orientation value);
 
-    // extended interface
+    // Extended interface(internal use)
     int grabFrame(int n);
     /// retrieve first completed request(use with causion)
     libcamera::Request* retrieveRequest(int timeout_ms);
+    bool retrieveFrameFromRequest(libcamera::Request* request, OutputArray image);
     /// finish first completed request(use with causion)
     void finishRequest(libcamera::Request*);
 
 private:
     void onRequestCompleted(libcamera::Request* request);
     void onDisconnected();
-    bool retrieveFrameFromRequest(libcamera::Request* request, OutputArray image);
 
     std::shared_ptr<libcamera::Camera> camera_;
     std::unique_ptr<libcamera::CameraConfiguration> camera_config_;
